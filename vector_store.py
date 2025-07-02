@@ -399,6 +399,30 @@ class VectorStore:
             print(f"문서 삭제 중 오류: {e}")
             return False
     
+    def delete_exam_data(self, exam_name: str) -> bool:
+        """특정 시험의 모든 데이터 삭제"""
+        try:
+            # 해당 시험의 문서 ID들 찾기
+            doc_ids_to_delete = []
+            for meta in self.metadata:
+                if meta.get("subject") == exam_name:
+                    doc_ids_to_delete.append(meta.get("id"))
+            
+            if not doc_ids_to_delete:
+                print(f"시험 '{exam_name}'의 데이터를 찾을 수 없습니다.")
+                return True  # 삭제할 데이터가 없어도 성공으로 처리
+            
+            # 각 문서 삭제
+            for doc_id in doc_ids_to_delete:
+                self.delete_document(doc_id)
+            
+            print(f"✅ 시험 '{exam_name}' 데이터 삭제 완료: {len(doc_ids_to_delete)}개 문서")
+            return True
+            
+        except Exception as e:
+            print(f"시험 데이터 삭제 중 오류: {e}")
+            return False
+    
     def _rebuild_index(self):
         """FAISS 인덱스 재구성"""
         if self.embedding_model is None or not self.documents:

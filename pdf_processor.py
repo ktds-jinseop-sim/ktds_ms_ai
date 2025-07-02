@@ -14,13 +14,10 @@ import json
 
 # Docling 관련 import
 try:
-    from docling import Document, DocumentProcessor
-    from docling.processors import PDFProcessor
+    from docling.document_converter import DocumentConverter
 except ImportError:
     print("Docling이 설치되지 않았습니다. pip install docling을 실행해주세요.")
-    Document = None
-    DocumentProcessor = None
-    PDFProcessor = None
+    DocumentConverter = None
 
 # FAISS 관련 import
 try:
@@ -69,31 +66,20 @@ class PDFProcessor:
         """PDF 파일 처리 및 벡터화"""
         print(f"\n📄 [PDF 처리] 파일: {pdf_file_path}")
         
-        if Document is None or PDFProcessor is None:
+        if DocumentConverter is None:
             return {"success": False, "error": "Docling 라이브러리가 설치되지 않았습니다."}
         
         try:
-            # PDF 파일 읽기
-            with open(pdf_file_path, 'rb') as f:
-                pdf_content = f.read()
-            
-            # Docling으로 PDF 처리
-            document = Document.from_bytes(pdf_content, filename=Path(pdf_file_path).name)
-            processor = DocumentProcessor([PDFProcessor()])
-            processed_doc = processor.process(document)
-            
-            # 텍스트 추출 및 청크 분할
-            text_chunks = self._extract_and_chunk_text(processed_doc, subject)
-            
+            converter = DocumentConverter()
+            result = converter.convert(pdf_file_path)
+            # 전체 텍스트 추출 (Markdown 기준)
+            full_text = result.document.export_to_markdown()
+            # 텍스트 청크 분할 및 벡터화는 기존 로직 재사용
+            text_chunks = self._extract_and_chunk_text_from_text(full_text, subject)
             if not text_chunks:
                 return {"success": False, "error": "PDF에서 텍스트를 추출할 수 없습니다."}
-            
-            # 벡터화 및 저장
             self._vectorize_and_store(text_chunks, subject, pdf_file_path)
-            
-            # 결과 저장
             self._save_metadata()
-            
             print(f"✅ PDF 처리 완료 - {len(text_chunks)}개 청크 생성")
             return {
                 "success": True,
@@ -101,34 +87,22 @@ class PDFProcessor:
                 "subject": subject,
                 "filename": Path(pdf_file_path).name
             }
-            
         except Exception as e:
             error_msg = f"PDF 처리 중 오류 발생: {e}"
             print(f"❌ {error_msg}")
             return {"success": False, "error": error_msg}
     
-    def _extract_and_chunk_text(self, processed_doc, subject: str) -> List[Dict[str, Any]]:
-        """텍스트 추출 및 청크 분할"""
+    def _extract_and_chunk_text_from_text(self, full_text: str, subject: str) -> List[Dict[str, Any]]:
+        """텍스트(문자열)에서 청크 분할"""
         chunks = []
-        
         try:
-            # 전체 텍스트 추출
-            full_text = ""
-            for page in processed_doc.pages:
-                if hasattr(page, 'text'):
-                    full_text += page.text + "\n"
-            
-            # 텍스트 청크 분할 (500자 단위)
             chunk_size = 500
             overlap = 100
-            
             for i in range(0, len(full_text), chunk_size - overlap):
                 chunk_text = full_text[i:i + chunk_size]
-                if len(chunk_text.strip()) < 50:  # 너무 짧은 청크 제외
+                if len(chunk_text.strip()) < 50:
                     continue
-                
                 chunk_id = hashlib.md5(f"{subject}_{i}_{chunk_text[:50]}".encode()).hexdigest()
-                
                 chunks.append({
                     "id": chunk_id,
                     "text": chunk_text.strip(),
@@ -137,10 +111,8 @@ class PDFProcessor:
                     "subject": subject,
                     "created_at": datetime.now().isoformat()
                 })
-        
         except Exception as e:
             print(f"텍스트 추출 중 오류: {e}")
-        
         return chunks
     
     def _vectorize_and_store(self, chunks: List[Dict[str, Any]], subject: str, pdf_file_path: str):
